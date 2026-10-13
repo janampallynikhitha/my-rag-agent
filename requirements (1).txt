@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+langserve
+langchain-core
+langchain-community
+langchain-chroma
+sentence-transformers
+transformers
+torch
