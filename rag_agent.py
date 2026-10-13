@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from langchain_core.runnables import RunnableLambda
 from langserve import add_routes
+from pydantic import BaseModel
 
 app = FastAPI(
     title="My RAG Agent",
@@ -48,7 +49,8 @@ documents = [
 def tokenize(text):
     return set(re.findall(r"\b[a-z0-9]+\b", text.lower()))
 
-
+class RagInput(BaseModel):
+    input: str
 def rag_response(data: dict) -> dict:
     question = data.get("input", "").strip()
 
@@ -92,7 +94,9 @@ def rag_response(data: dict) -> dict:
     }
 
 
-rag_chain = RunnableLambda(rag_response)
+rag_chain = RunnableLambda(rag_response).with_types(
+    input_type=RagInput
+)
 
 
 @app.get("/")
