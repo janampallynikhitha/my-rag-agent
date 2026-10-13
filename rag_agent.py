@@ -1,69 +1,53 @@
 
-import os
+import re
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
-from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda
-from langchain_chroma import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from transformers import pipeline
 from langserve import add_routes
 
 app = FastAPI(
     title="My RAG Agent",
     version="1.0",
-    description="A free, local-model RAG playground"
+    description="A lightweight RAG playground"
 )
 
-# Sample knowledge base
+# Small sample knowledge base
 documents = [
-    Document(
-        page_content=(
+    {
+        "text": (
             "RAG stands for Retrieval-Augmented Generation. "
             "It retrieves relevant information from a knowledge base "
-            "and uses a language model to answer questions."
+            "and uses it to answer questions."
         ),
-        metadata={"source": "rag_basics.txt"}
-    ),
-    Document(
-        page_content=(
+        "source": "rag_basics.txt"
+    },
+    {
+        "text": (
             "ChromaDB stores document embeddings and retrieves "
             "relevant text using semantic similarity."
         ),
-        metadata={"source": "chromadb.txt"}
-    ),
-    Document(
-        page_content=(
+        "source": "chromadb.txt"
+    },
+    {
+        "text": (
             "LangServe deploys LangChain runnable applications "
             "as APIs and provides a playground interface."
         ),
-        metadata={"source": "langserve.txt"}
-    ),
-    Document(
-        page_content=(
+        "source": "langserve.txt"
+    },
+    {
+        "text": (
             "Google Colab is a browser-based notebook for running Python."
         ),
-        metadata={"source": "colab.txt"}
-    )
+        "source": "colab.txt"
+    }
 ]
 
-# Build the document retrieval system
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
 
-vectorstore = Chroma.from_documents(
-    documents=documents,
-    embedding=embeddings,
-    collection_name="my_rag_documents"
-)
+def tokenize(text):
+    return set(re.findall(r"\b[a-z0-9]+\b", text.lower()))
 
-# Load the free language model
-generator = pipeline(
-    "text-generation",
-    model="distilgpt2"
-)
 
 def rag_response(data: dict) -> dict:
     question = data.get("input", "").strip()
@@ -71,43 +55,50 @@ def rag_response(data: dict) -> dict:
     if not question:
         return {"output": "Please enter a question."}
 
-    docs = vectorstore.similarity_search(question, k=2)
+    question_words = tokenize(question)
 
-    context = "\n".join(doc.page_content for doc in docs)
+    if not question_words:
+        return {"output": "Please enter a valid question."}
 
-    prompt = (
-        "Question: " + question + "\n"
-        "Relevant information: " + context + "\n"
-        "Answer:"
-    )
+    # Retrieve the most relevant documents without loading ML models.
+    ranked = []
 
-    result = generator(
-        prompt,
-        max_new_tokens=80,
-        do_sample=False,
-        pad_token_id=generator.tokenizer.eos_token_id
-    )
+    for doc in documents:
+        doc_words = tokenize(doc["text"])
+        score = len(question_words & doc_words)
+        ranked.append((score, doc))
 
-    generated = result[0]["generated_text"]
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    relevant = [
+        doc for score, doc in ranked[:2] if score > 0
+    ]
 
-    # Return only the generated continuation when available
-    answer = generated[len(prompt):].strip()
+    if not relevant:
+        return {
+            "output": (
+                "I couldn't find relevant information "
+                "in the current knowledge base."
+            )
+        }
 
-    sources = ", ".join(
-        doc.metadata.get("source", "Unknown") for doc in docs
-    )
+    context = "\n".join(doc["text"] for doc in relevant)
+    sources = ", ".join(doc["source"] for doc in relevant)
 
     return {
         "output": (
-            f"Answer: {answer or 'No answer generated.'}\n\n"
+            f"Relevant information:\n{context}\n\n"
             f"Sources: {sources}"
         )
     }
 
+
 rag_chain = RunnableLambda(rag_response)
+
 
 @app.get("/")
 def home():
     return RedirectResponse(url="/rag/playground/")
 
+
 add_routes(app, rag_chain, path="/rag")
+
